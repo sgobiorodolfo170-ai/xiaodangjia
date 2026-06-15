@@ -1,5 +1,10 @@
-﻿mod db;
+mod db;
 mod watcher;
+mod ast_parser;
+mod tfidf;
+mod semantic_search;
+mod semantic_embedding;
+mod plugin_system;
 
 use db::{Database, Project, FileNode};
 use std::sync::Mutex;
@@ -12,6 +17,20 @@ use std::path::Path;
 
 pub struct AppState {
     db: Mutex<Database>,
+}
+
+// Helper: validate that a path is within the project root
+fn validate_path_in_project(path: &str, project_root: &str) -> Result<(), String> {
+    let canonical = Path::new(path)
+        .canonicalize()
+        .map_err(|_| format!("Invalid path: {}", path))?;
+    let root = Path::new(project_root)
+        .canonicalize()
+        .map_err(|_| format!("Invalid project root: {}", project_root))?;
+    if !canonical.starts_with(&root) {
+        return Err(format!("Path is outside project root: {}", path));
+    }
+    Ok(())
 }
 
 // Project commands
@@ -46,21 +65,25 @@ fn scan_directory(project_id: String, path: String, state: State<AppState>) -> R
     if !root_path.exists() {
         return Err("Path does not exist".to_string());
     }
-    
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.delete_file_nodes_by_project(&project_id).map_err(|e| e.to_string())?;
-    
+
     let mut nodes = Vec::new();
-    
-    for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
+    let mut errors: Vec<String> = Vec::new();
+
+    for entry in WalkDir::new(&path).into_iter().filter_map(|e| match e {
+        Ok(e) => Some(e),
+        Err(err) => {
+            errors.push(format!("Error accessing {}: {}", err.path().unwrap_or_else(|| Path::new("?")).display(), err));
+            None
+        }
+    }) {
         let entry_path = entry.path();
         let metadata = entry_path.metadata().ok();
-        
+
         let is_dir = entry_path.is_dir();
         let name = entry_path.file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        
+
         let extension = if is_dir {
             String::new()
         } else {
@@ -68,7 +91,7 @@ fn scan_directory(project_id: String, path: String, state: State<AppState>) -> R
                 .map(|e| e.to_string_lossy().to_string())
                 .unwrap_or_default()
         };
-        
+
         let (created_at, modified_at, size) = match metadata {
             Some(m) => {
                 let created = m.created().ok()
@@ -80,27 +103,26 @@ fn scan_directory(project_id: String, path: String, state: State<AppState>) -> R
             }
             None => (None, None, 0),
         };
-        
-        let parent_path = entry_path.parent();
-        let parent_id = if let Some(parent) = parent_path {
-            if parent.to_string_lossy().to_string() == path {
+
+        // Compute parent_id correctly by matching parent path
+        let parent_id = entry_path.parent().and_then(|parent| {
+            let parent_str = parent.to_string_lossy().to_string();
+            if parent_str == path {
                 None
             } else {
-                None
+                nodes.iter().find(|n: &&FileNode| n.path == parent_str).map(|n| n.id.clone())
             }
-        } else {
-            None
-        };
-        
+        });
+
         let position_index = nodes.len() as f64;
         let x = (position_index % 5.0) * 250.0;
         let y = (position_index / 5.0) * 150.0;
-        
+
         // Generate tags
         let mut tags = vec![];
         let ext_lower = extension.to_lowercase();
         let name_lower = name.to_lowercase();
-        
+
         match ext_lower.as_str() {
             "js" | "jsx" | "ts" | "tsx" => tags.push("JavaScript".to_string()),
             "py" => tags.push("Python".to_string()),
@@ -115,7 +137,7 @@ fn scan_directory(project_id: String, path: String, state: State<AppState>) -> R
             "zip" | "rar" | "7z" => tags.push("压缩包".to_string()),
             _ => {}
         }
-        
+
         if name_lower.contains("test") || name_lower.contains("spec") {
             tags.push("测试".to_string());
         }
@@ -131,7 +153,7 @@ fn scan_directory(project_id: String, path: String, state: State<AppState>) -> R
         if is_dir {
             tags.push("目录".to_string());
         }
-        
+
         let node = FileNode {
             id: Uuid::new_v4().to_string(),
             project_id: project_id.clone(),
@@ -148,16 +170,27 @@ fn scan_directory(project_id: String, path: String, state: State<AppState>) -> R
             is_collapsed: false,
             is_directory: is_dir,
         };
-        
-        let _ = db.insert_file_node(&node);
+
         nodes.push(node);
     }
-    
+
+    // Only persist to DB after successful scan
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.delete_file_nodes_by_project(&project_id).map_err(|e| e.to_string())?;
+    for node in &nodes {
+        let _ = db.insert_file_node(node);
+    }
+
+    if !errors.is_empty() {
+        log::warn!("Scan completed with {} errors: {:?}", errors.len(), errors);
+    }
+
     Ok(nodes)
 }
 
 // File content commands
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileContent {
     path: String,
     content: String,
@@ -171,17 +204,17 @@ fn read_file_content(path: String) -> Result<FileContent, String> {
     if !path_obj.exists() {
         return Err("File does not exist".to_string());
     }
-    
+
     if path_obj.is_dir() {
         return Err("Cannot read directory".to_string());
     }
-    
+
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
-    
+
     let metadata = fs::metadata(&path)
         .map_err(|e| format!("Failed to get metadata: {}", e))?;
-    
+
     Ok(FileContent {
         path,
         content,
@@ -197,7 +230,13 @@ fn write_file_content(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_file(path: String) -> Result<(), String> {
+fn delete_file(project_id: String, path: String, state: State<AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let root = db.get_project_root(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("Project not found")?;
+    validate_path_in_project(&path, &root)?;
+
     let path_obj = Path::new(&path);
     if path_obj.is_dir() {
         fs::remove_dir_all(&path)
@@ -209,7 +248,14 @@ fn delete_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+fn rename_file(project_id: String, old_path: String, new_path: String, state: State<AppState>) -> Result<(), String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let root = db.get_project_root(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("Project not found")?;
+    validate_path_in_project(&old_path, &root)?;
+    validate_path_in_project(&new_path, &root)?;
+
     fs::rename(&old_path, &new_path)
         .map_err(|e| format!("Failed to rename file: {}", e))
 }
@@ -226,10 +272,10 @@ fn update_node_position(id: String, x: f64, y: f64, state: State<AppState>) -> R
 fn analyze_file_relations(project_id: String, state: State<AppState>) -> Result<Vec<db::FileRelation>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let nodes = db.get_file_nodes_by_project(&project_id).map_err(|e| e.to_string())?;
-    
+
     let relations = watcher::analyze_relations(&nodes);
     log::info!("Analyzed {} relations for project {}", relations.len(), project_id);
-    
+
     Ok(relations)
 }
 
@@ -237,13 +283,13 @@ fn analyze_file_relations(project_id: String, state: State<AppState>) -> Result<
 fn generate_tags(project_id: String, file_id: String, state: State<AppState>) -> Result<Vec<String>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let nodes = db.get_file_nodes_by_project(&project_id).map_err(|e| e.to_string())?;
-    
+
     let node = nodes.iter().find(|n| n.id == file_id)
         .ok_or("File not found")?;
-    
+
     let tags = watcher::generate_file_tags(node);
     log::info!("Generated {} tags for file {}", tags.len(), file_id);
-    
+
     Ok(tags)
 }
 
@@ -251,10 +297,10 @@ fn generate_tags(project_id: String, file_id: String, state: State<AppState>) ->
 fn search_files(project_id: String, query: String, state: State<AppState>) -> Result<Vec<FileNode>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let nodes = db.get_file_nodes_by_project(&project_id).map_err(|e| e.to_string())?;
-    
+
     let results = watcher::search_files(&nodes, &query);
     log::info!("Search '{}' found {} results", query, results.len());
-    
+
     Ok(results)
 }
 
@@ -262,13 +308,13 @@ fn search_files(project_id: String, query: String, state: State<AppState>) -> Re
 fn find_similar_files(project_id: String, file_id: String, state: State<AppState>) -> Result<Vec<FileNode>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let nodes = db.get_file_nodes_by_project(&project_id).map_err(|e| e.to_string())?;
-    
+
     let target = nodes.iter().find(|n| n.id == file_id)
         .ok_or("File not found")?;
-    
+
     let similar = watcher::find_similar_files(&nodes, target);
     log::info!("Found {} similar files for {}", similar.len(), file_id);
-    
+
     Ok(similar)
 }
 
@@ -278,16 +324,28 @@ fn start_file_watcher(project_id: String, path: String, app_handle: AppHandle) -
     watcher::start_file_watcher(app_handle, project_id, path)
 }
 
-// Dialog command
+// Dialog command - delegates to the Tauri dialog plugin
 #[tauri::command]
-fn open_directory_dialog() -> Result<Option<String>, String> {
-    Ok(None)
+async fn open_directory_dialog(app_handle: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    app_handle.dialog()
+        .file()
+        .pick_folder(move |path| {
+            let _ = tx.send(path.map(|p| p.to_string()));
+        });
+
+    rx.recv().map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
-    
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -295,14 +353,14 @@ pub fn run() {
         .setup(|app| {
             let app_data_dir = app.path().app_data_dir()
                 .expect("Failed to get app data directory");
-            
+
             let db = Database::new(app_data_dir)
                 .expect("Failed to initialize database");
-            
+
             app.manage(AppState {
                 db: Mutex::new(db),
             });
-            
+
             log::info!("小当家应用启动成功");
             Ok(())
         })

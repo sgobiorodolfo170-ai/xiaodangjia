@@ -1,29 +1,9 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import * as api from '../../services/api';
+import { listen } from '@tauri-apps/api/event';
 import { FileNode } from '../../types';
-
-let openDialog: (() => Promise<string | null>) | null = null;
-
-async function loadDialog() {
-  if (!openDialog) {
-    try {
-      const dialog = await import('@tauri-apps/plugin-dialog');
-      openDialog = async () => {
-        const result = await dialog.open({
-          directory: true,
-          multiple: false,
-          title: '选择项目文件夹',
-        });
-        return result as string | null;
-      };
-    } catch (e) {
-      console.warn('Dialog plugin not available');
-      return null;
-    }
-  }
-  return openDialog;
-}
+import FileTree from './FileTree';
 
 export default function Sidebar() {
   const {
@@ -35,6 +15,9 @@ export default function Sidebar() {
     setRelations,
     isLoading,
     setIsLoading,
+    fileNodes,
+    setSelectedNodeIds,
+    setViewport,
   } = useAppStore();
 
   const [newProjectName, setNewProjectName] = useState('');
@@ -42,6 +25,7 @@ export default function Sidebar() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FileNode[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     loadProjects();
@@ -55,6 +39,54 @@ export default function Sidebar() {
       console.error('Failed to load projects:', error);
     }
   };
+
+  // Debounced re-scan on file changes
+  const debouncedRescan = useCallback(async () => {
+    if (rescanTimerRef.current) {
+      clearTimeout(rescanTimerRef.current);
+    }
+    rescanTimerRef.current = setTimeout(async () => {
+      if (currentProject) {
+        try {
+          const nodes = await api.scanDirectory(currentProject.id, currentProject.rootPath);
+          setFileNodes(nodes);
+        } catch (e) {
+          console.warn('Rescan failed:', e);
+        }
+      }
+    }, 2000); // 2s debounce
+  }, [currentProject, setFileNodes]);
+
+  // 监听文件变更，自动刷新画布
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupWatcher = async () => {
+      if (!currentProject) return;
+
+      try {
+        // 启动文件监听
+        await api.startFileWatcher(currentProject.id, currentProject.rootPath);
+
+        // 监听文件变更事件
+        unlisten = await listen<{ event_type: string; path: string; is_directory: boolean }>('file-change', async () => {
+          console.log('File changed, scheduling rescan');
+          debouncedRescan();
+        });
+      } catch (e) {
+        console.warn('File watcher not available:', e);
+      }
+    };
+
+    setupWatcher();
+
+    return () => {
+      if (unlisten) unlisten();
+      if (rescanTimerRef.current) {
+        clearTimeout(rescanTimerRef.current);
+      }
+    };
+  }, [currentProject?.id]);
 
   const handleSelectProject = async (project: typeof projects[0]) => {
     setCurrentProject(project);
@@ -75,13 +107,7 @@ export default function Sidebar() {
     if (!newProjectName.trim()) return;
 
     try {
-      const dialogFn = await loadDialog();
-      if (!dialogFn) {
-        alert('请手动输入项目路径');
-        return;
-      }
-
-      const selected = await dialogFn();
+      const selected = await api.openDirectoryDialog();
 
       if (selected) {
         setIsLoading(true);
@@ -152,10 +178,15 @@ export default function Sidebar() {
     setSearchResults([]);
   };
 
-  const handleSearchResultClick = (node: FileNode) => {
-    // TODO: Focus on the node in canvas
-    console.log('Clicked:', node.name);
-  };
+  const handleSearchResultClick = useCallback((node: FileNode) => {
+    // 选中节点并定位到画布
+    setSelectedNodeIds([node.id]);
+
+    // 将视口居中到该节点
+    const viewportX = -node.positionX + 400;
+    const viewportY = -node.positionY + 300;
+    setViewport({ x: viewportX, y: viewportY, zoom: 1 });
+  }, [setSelectedNodeIds, setViewport]);
 
   return (
     <div className="w-64 h-full bg-gray-900 text-white flex flex-col">
@@ -210,6 +241,11 @@ export default function Sidebar() {
             <span>AI 分析关联</span>
           </button>
         </div>
+      )}
+
+      {/* File Tree */}
+      {currentProject && fileNodes.length > 0 && (
+        <FileTree nodes={fileNodes} />
       )}
 
       {/* Search Results */}

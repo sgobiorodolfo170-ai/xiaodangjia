@@ -1,4 +1,4 @@
-﻿import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { FileNode, Project, FileContent, FileRelation } from '../types';
 
 export async function createProject(name: string, rootPath: string): Promise<Project> {
@@ -29,12 +29,12 @@ export async function writeFileContent(path: string, content: string): Promise<v
   return invoke('write_file_content', { path, content });
 }
 
-export async function deleteFile(path: string): Promise<void> {
-  return invoke('delete_file', { path });
+export async function deleteFile(projectId: string, path: string): Promise<void> {
+  return invoke('delete_file', { projectId, path });
 }
 
-export async function renameFile(oldPath: string, newPath: string): Promise<void> {
-  return invoke('rename_file', { oldPath, newPath });
+export async function renameFile(projectId: string, oldPath: string, newPath: string): Promise<void> {
+  return invoke('rename_file', { projectId, oldPath, newPath });
 }
 
 export async function updateNodePosition(id: string, x: number, y: number): Promise<void> {

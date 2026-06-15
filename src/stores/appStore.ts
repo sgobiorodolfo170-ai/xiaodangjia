@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { FileNode, Project, OpenTab, Viewport, FileRelation } from '../types';
 
 interface AppState {
@@ -6,11 +6,12 @@ interface AppState {
   currentProject: Project | null;
   setProjects: (projects: Project[]) => void;
   setCurrentProject: (project: Project | null) => void;
-  
+
   fileNodes: FileNode[];
   setFileNodes: (nodes: FileNode[]) => void;
   addFileNode: (node: FileNode) => void;
   updateFileNode: (id: string, updates: Partial<FileNode>) => void;
+  updateFileTags: (id: string, tags: string[]) => void;
   removeFileNode: (id: string) => void;
   
   relations: FileRelation[];
@@ -32,6 +33,8 @@ interface AppState {
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
   
+  darkMode: boolean;
+  setDarkMode: (dark: boolean) => void;
   updateNodePosition: (id: string, x: number, y: number) => void;
 }
 
@@ -54,16 +57,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   removeFileNode: (id) => set((state) => ({
     fileNodes: state.fileNodes.filter((n) => n.id !== id)
   })),
-  
+
+  updateFileTags: (id, tags) => set((state) => ({
+    fileNodes: state.fileNodes.map((n) =>
+      n.id === id ? { ...n, tags } : n
+    )
+  })),
+
   relations: [],
   setRelations: (relations) => set({ relations }),
   
   openTabs: [],
   activeTabId: null,
-  openTab: (tab) => set((state) => ({
-    openTabs: [...state.openTabs, tab],
-    activeTabId: tab.id
-  })),
+  openTab: (tab) => set((state) => {
+    // Prevent duplicate tabs - reuse existing tab if fileId already open
+    const existing = state.openTabs.find((t) => t.fileId === tab.fileId);
+    if (existing) {
+      return { activeTabId: existing.id };
+    }
+    return {
+      openTabs: [...state.openTabs, tab],
+      activeTabId: tab.id,
+    };
+  }),
   closeTab: (id) => set((state) => {
     const newTabs = state.openTabs.filter((t) => t.id !== id);
     let newActiveId = state.activeTabId;
@@ -86,6 +102,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedNodeIds: [],
   setSelectedNodeIds: (ids) => set({ selectedNodeIds: ids }),
   
+  darkMode: false,
+  setDarkMode: (dark) => set({ darkMode: dark }),
   isLoading: false,
   setIsLoading: (loading) => set({ isLoading: loading }),
   

@@ -1,8 +1,8 @@
-﻿{
+{
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "小当家",
   "version": "0.1.0",
-  "identifier": "com.xiaodangjia.app",
+  "identifier": "com.xiaodangjia.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -37,14 +37,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "dialog": {
-      "all": true
-    },
-    "fs": {
-      "all": true,
-      "scope": ["**"]
-    }
   }
 }

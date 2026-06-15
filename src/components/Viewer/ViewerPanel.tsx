@@ -1,7 +1,8 @@
-﻿import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import { useAppStore } from '../../stores/appStore';
 import * as api from '../../services/api';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'];
 const VIDEO_EXTS = ['mp4', 'webm', 'mkv', 'mov'];
@@ -12,6 +13,7 @@ export default function ViewerPanel() {
   const [content, setContent] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initialContentRef = useRef<string>('');
 
   const activeTab = openTabs.find((t) => t.id === activeTabId);
 
@@ -28,6 +30,7 @@ export default function ViewerPanel() {
       try {
         const result = await api.readFileContent(activeTab.path);
         setContent(result.content);
+        initialContentRef.current = result.content;
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load file');
         setContent('');
@@ -42,9 +45,8 @@ export default function ViewerPanel() {
   const handleEditorChange = (value: string | undefined) => {
     if (!activeTab || value === undefined) return;
     setContent(value);
-    if (value !== content) {
-      updateTab(activeTab.id, { isModified: true });
-    }
+    const isModified = value !== initialContentRef.current;
+    updateTab(activeTab.id, { isModified });
   };
 
   const handleSave = async () => {
@@ -52,6 +54,7 @@ export default function ViewerPanel() {
 
     try {
       await api.writeFileContent(activeTab.path, content);
+      initialContentRef.current = content;
       updateTab(activeTab.id, { isModified: false });
     } catch (err) {
       alert('Failed to save: ' + (err instanceof Error ? err.message : err));
@@ -70,6 +73,8 @@ export default function ViewerPanel() {
       </div>
     );
   }
+
+  const mediaSrc = convertFileSrc(activeTab.path);
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -113,7 +118,7 @@ export default function ViewerPanel() {
         {!loading && !error && isImage && (
           <div className="h-full flex items-center justify-center p-4 bg-gray-100">
             <img
-              src={`file://${activeTab.path}`}
+              src={mediaSrc}
               alt={activeTab.name}
               className="max-w-full max-h-full object-contain"
             />
@@ -123,7 +128,7 @@ export default function ViewerPanel() {
         {!loading && !error && isVideo && (
           <div className="h-full flex items-center justify-center bg-black">
             <video
-              src={`file://${activeTab.path}`}
+              src={mediaSrc}
               controls
               className="max-w-full max-h-full"
             />
@@ -133,7 +138,7 @@ export default function ViewerPanel() {
         {!loading && !error && isAudio && (
           <div className="h-full flex items-center justify-center bg-gray-100">
             <audio
-              src={`file://${activeTab.path}`}
+              src={mediaSrc}
               controls
               className="w-full max-w-md"
             />
