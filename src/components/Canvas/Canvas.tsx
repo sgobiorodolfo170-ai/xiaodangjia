@@ -260,7 +260,6 @@ function CanvasInner() {
     if (newNodes.length > 0) {
       // Add new nodes to store
       setFileNodes([...fileNodes, ...newNodes]);
-      console.log(`已添加 ${newNodes.length} 个文件到画布`);
     }
   }, [currentProject, fileNodes, screenToFlowPosition, setFileNodes]);
 

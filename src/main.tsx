@@ -11,16 +11,10 @@ window.onunhandledrejection = (event) => {
   console.error('Unhandled promise rejection:', event.reason);
 };
 
-// 测试 React 是否能渲染
-console.log('Starting React app...');
-
 const rootElement = document.getElementById("root");
-console.log('Root element:', rootElement);
 
 ReactDOM.createRoot(rootElement as HTMLElement).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
 );
-
-console.log('React app rendered');

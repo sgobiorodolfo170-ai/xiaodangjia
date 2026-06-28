@@ -104,7 +104,6 @@ export default function Sidebar() {
 
         // 监听文件变更事件
         unlisten = await listen<{ event_type: string; path: string; is_directory: boolean }>('file-change', async () => {
-          console.log('File changed, scheduling rescan');
           debouncedRescan();
         });
       } catch (e) {

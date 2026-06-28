@@ -70,11 +70,5 @@ export interface ArchiveSuggestion {
   reason: string;
 }
 
-export interface PluginMetadata {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  author: string;
-  enabled: boolean;
-}
+// Note: plugin_system was removed as dead code.
+// If plugin support is reintroduced, add PluginMetadata here.

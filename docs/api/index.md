@@ -49,7 +49,7 @@ description: 小当家项目的 API 接口参考文档
 | `suggestArchiveLocation(projectId, fileId)` | 智能归档建议 | `projectId: string`, `fileId: string` |
 | `parseFileImports(path)` | 解析文件导入 | `path: string` |
 | `analyzeImportRelations(projectId)` | 分析导入关系 | `projectId: string` |
-| `listPlugins()` | 列出已注册插件 | - |
+| ~~`listPlugins()`~~ | ~~列出已注册插件~~ (已移除) | - |
 
 ### 1.5 系统交互
 
@@ -160,9 +160,7 @@ fn parse_file_imports(path: String) -> Result<Vec<String>, String>
 #[tauri::command]
 fn analyze_import_relations(project_id: String, state: State<AppState>) -> Result<Vec<ImportRelationResult>, String>
 
-// 列出插件
-#[tauri::command]
-fn list_plugins() -> Result<Vec<PluginMetadata>, String>
+// (插件系统已移除)
 ```
 
 ### 2.5 系统交互命令
