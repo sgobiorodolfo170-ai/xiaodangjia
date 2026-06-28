@@ -10,6 +10,7 @@ pub struct Document {
     pub id: String,
     pub content: String,
     pub tokens: Vec<String>,
+    pub token_set: HashSet<String>,
 }
 
 /// TF-IDF index for computing document similarity
@@ -41,13 +42,13 @@ impl TfidfIndex {
     pub fn add_document(&mut self, id: String, content: String) {
         let tokens = Self::tokenize(&content);
 
-        // Collect unique tokens for vocabulary
         let unique_tokens: HashSet<String> = tokens.iter().cloned().collect();
-        self.vocabulary.extend(unique_tokens);
+        self.vocabulary.extend(unique_tokens.iter().cloned());
 
         self.documents.insert(id.clone(), Document {
             id,
             content,
+            token_set: unique_tokens,
             tokens,
         });
     }
@@ -60,7 +61,7 @@ impl TfidfIndex {
         for term in &self.vocabulary {
             let mut doc_count = 0;
             for doc in self.documents.values() {
-                if doc.tokens.contains(term) {
+                if doc.token_set.contains(term) {
                     doc_count += 1;
                 }
             }

@@ -19,7 +19,8 @@ export default function Sidebar() {
     setFileNodes,
     setRelations,
     isLoading,
-    setIsLoading,
+    startLoading,
+    stopLoading,
     fileNodes,
     setSelectedNodeIds,
     setViewport,
@@ -130,7 +131,7 @@ export default function Sidebar() {
   const handleSelectProject = async (project: typeof projects[0]) => {
     clearProjectState();
     setFileNodes([]);
-    setIsLoading(true);
+    startLoading();
     try {
       const nodes = await api.scanDirectory(project.id, project.rootPath);
       setCurrentProject(project);
@@ -140,7 +141,7 @@ export default function Sidebar() {
     } catch (error) {
       console.error('Failed to scan directory:', error);
     } finally {
-      setIsLoading(false);
+      stopLoading();
     }
   };
 
@@ -174,7 +175,7 @@ export default function Sidebar() {
       const pathParts = selectedPath.replace(/\\/g, '/').split('/');
       const folderName = pathParts[pathParts.length - 1] || '新项目';
 
-      setIsLoading(true);
+      startLoading();
 
       // 创建项目
       const project = await api.createProject(folderName, selectedPath);
@@ -184,10 +185,10 @@ export default function Sidebar() {
       // 扫描目录
       const nodes = await api.scanDirectory(project.id, project.rootPath);
       setFileNodes(nodes);
-      setIsLoading(false);
+      stopLoading();
     } catch (error) {
       console.error('Failed to create project:', error);
-      setIsLoading(false);
+      stopLoading();
     }
   };
 
@@ -204,7 +205,7 @@ export default function Sidebar() {
           ? parentFolderPath + newFolderName 
           : parentFolderPath + '\\' + newFolderName;
         
-        setIsLoading(true);
+        startLoading();
         // 先创建文件夹
         await api.createDirectory(rootPath);
       } else {
@@ -212,7 +213,7 @@ export default function Sidebar() {
         const selected = await api.openDirectoryDialog();
         if (!selected) return;
         rootPath = selected;
-        setIsLoading(true);
+        startLoading();
       }
 
       // 创建项目
@@ -230,10 +231,10 @@ export default function Sidebar() {
       // 扫描目录
       const nodes = await api.scanDirectory(project.id, project.rootPath);
       setFileNodes(nodes);
-      setIsLoading(false);
+      stopLoading();
     } catch (error) {
       console.error('Failed to create project:', error);
-      setIsLoading(false);
+      stopLoading();
     }
   };
 
@@ -270,7 +271,7 @@ export default function Sidebar() {
   const handleAnalyzeRelations = async () => {
     if (!currentProject) return;
 
-    setIsLoading(true);
+    startLoading();
     try {
       const rels = await api.analyzeFileRelations(currentProject.id);
       setRelations(rels);
@@ -279,7 +280,7 @@ export default function Sidebar() {
       console.error('Analysis failed:', error);
       toast.error('分析失败');
     } finally {
-      setIsLoading(false);
+      stopLoading();
     }
   };
 
