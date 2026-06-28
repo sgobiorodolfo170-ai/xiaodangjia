@@ -15,13 +15,18 @@ description: 小当家项目的 API 接口参考文档
 | `listProjects()` | 获取项目列表 | - |
 | `getProject(id)` | 获取项目详情 | `id: string` |
 | `deleteProject(id)` | 删除项目 | `id: string` |
+| `createDirectory(path, projectId?)` | 创建目录 | `path: string`, `projectId?: string` |
 
 ### 1.2 文件操作
 
 | 函数 | 说明 | 参数 |
 |------|------|------|
 | `deleteFile(projectId, path)` | 删除文件 | `projectId: string`, `path: string` |
+| `deleteFilePermanent(path, projectId?)` | 永久删除文件 | `path: string`, `projectId?: string` |
 | `renameFile(projectId, oldPath, newPath)` | 重命名文件 | `projectId: string`, `oldPath: string`, `newPath: string` |
+| `moveFile(source, destination, projectId?)` | 移动文件 | `source: string`, `destination: string`, `projectId?: string` |
+| `copyFile(source, destination, projectId?)` | 复制文件 | `source: string`, `destination: string`, `projectId?: string` |
+| `trashFile(path, projectId?)` | 移到回收站 | `path: string`, `projectId?: string` |
 
 ### 1.3 节点管理
 
@@ -29,6 +34,7 @@ description: 小当家项目的 API 接口参考文档
 |------|------|------|
 | `updateNodePosition(id, x, y)` | 更新节点位置 | `id: string`, `x: number`, `y: number` |
 | `startFileWatcher(projectId, path)` | 启动文件监听 | `projectId: string`, `path: string` |
+| `stopFileWatcher(projectId)` | 停止文件监听 | `projectId: string` |
 
 ### 1.4 AI 分析
 
@@ -185,26 +191,28 @@ fn open_directory_dialog() -> Result<Option<String>, String>
 interface Project {
   id: string;
   name: string;
-  root_path: string;
-  created_at: string;
-  updated_at: string;
+  rootPath: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface FileNode {
   id: string;
-  project_id: string;
+  projectId: string;
   path: string;
   name: string;
   extension: string;
   size: number;
-  created_at: string | null;
-  modified_at: string | null;
+  createdAt: string | null;
+  modifiedAt: string | null;
   tags: string[];
-  parent_id: string | null;
-  position_x: number;
-  position_y: number;
-  is_collapsed: boolean;
-  is_directory: boolean;
+  parentId: string | null;
+  positionX: number;
+  positionY: number;
+  isCollapsed: boolean;
+  isDirectory: boolean;
+  children: string[];
+  relatedFiles: string[];
 }
 
 interface FileContent {
@@ -216,16 +224,15 @@ interface FileContent {
 
 interface FileRelation {
   id: string;
-  project_id: string;
-  source_id: string;
-  target_id: string;
-  relation_type: string;
+  projectId: string;
+  sourceId: string;
+  targetId: string;
+  relationType: 'similar' | 'import' | 'reference' | 'auto';
   confidence: number;
 }
 
 interface SimilarityResult {
   id: string;
-  name: string;
   score: number;
 }
 
@@ -236,20 +243,27 @@ interface ArchiveSuggestion {
 }
 
 interface ImportRelationResult {
-  source_id: string;
-  source_name: string;
-  target_id: string;
-  target_name: string;
+  sourceId: string;
+  sourceName: string;
+  targetId: string;
+  targetName: string;
   confidence: number;
 }
 
-interface PluginMetadata {
+interface OpenTab {
   id: string;
+  fileId: string;
+  path: string;
   name: string;
-  version: string;
-  description: string;
-  author: string;
-  enabled: boolean;
+  type: 'viewer' | 'editor';
+  isModified: boolean;
+  content?: string;
+}
+
+interface Viewport {
+  x: number;
+  y: number;
+  zoom: number;
 }
 ```
 
@@ -284,4 +298,4 @@ pub struct FileContent {
 
 ---
 
-*最后更新: 2026-06-16*
+*最后更新: 2026-06-28*
