@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -17,28 +17,33 @@ import '@xyflow/react/dist/style.css';
 import { useAppStore } from '../../stores/appStore';
 import { FileNode } from '../../types';
 import FileNodeComponent from './FileNode';
+import { BatchToolbar } from './BatchToolbar';
+import toast from 'react-hot-toast';
 
 const nodeTypes = {
   file: FileNodeComponent,
 };
 
 // 内部组件 - 使用 useReactFlow hook
-function CanvasContent() {
+function CanvasInner() {
   const {
     fileNodes,
     relations,
     currentProject,
     viewport,
     setViewport,
-    selectedNodeIds,
     setSelectedNodeIds,
     updateNodePosition,
     darkMode,
     setFileNodes,
+    isLoading,
   } = useAppStore();
 
   const [isDragging, setIsDragging] = useState(false);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+  // Track whether nodes have been initialized for the current project so we
+  // only fit the view on first load, not on every fileNodes change.
+  const fitDoneForProjectRef = useRef<string | null>(null);
 
   // Build set of collapsed directory IDs
   const collapsedDirIds = useMemo(() => {
@@ -70,60 +75,89 @@ function CanvasContent() {
     return hidden;
   }, [fileNodes, collapsedDirIds]);
 
-  // Convert fileNodes to React Flow nodes, filtering hidden ones
-  const initialNodes: Node[] = fileNodes
-    .filter((node) => !hiddenNodeIds.has(node.id))
-    .map((node) => ({
-      id: node.id,
-      type: 'file',
-      position: { x: node.positionX, y: node.positionY },
-      data: { ...node },
-    }));
+  // Convert fileNodes to React Flow nodes, filtering hidden ones (memoized)
+  const rfNodes: Node[] = useMemo(
+    () =>
+      fileNodes
+        .filter((node) => !hiddenNodeIds.has(node.id))
+        .map((node) => ({
+          id: node.id,
+          type: 'file',
+          position: { x: node.positionX, y: node.positionY },
+          data: { ...node },
+        })),
+    [fileNodes, hiddenNodeIds]
+  );
 
-  // Convert relations to React Flow edges, filtering hidden ones
-  const initialEdges: Edge[] = relations
-    .filter((rel) => !hiddenNodeIds.has(rel.sourceId) && !hiddenNodeIds.has(rel.targetId))
-    .map((rel) => ({
-    id: rel.id,
-    source: rel.sourceId,
-    target: rel.targetId,
-    type: 'smoothstep',
-    animated: rel.confidence > 0.7,
-    label: rel.relationType,
-    style: { 
-      stroke: rel.confidence > 0.7 ? '#22c55e' : '#94a3b8',
-      strokeWidth: Math.max(1, rel.confidence * 3),
-    },
-  }));
+  // Convert relations to React Flow edges, filtering hidden ones (memoized)
+  const rfEdges: Edge[] = useMemo(
+    () =>
+      relations
+        .filter((rel) => !hiddenNodeIds.has(rel.sourceId) && !hiddenNodeIds.has(rel.targetId))
+        .map((rel) => ({
+          id: rel.id,
+          source: rel.sourceId,
+          target: rel.targetId,
+          type: 'smoothstep',
+          animated: rel.confidence > 0.7,
+          label: rel.relationType,
+          style: {
+            stroke: rel.confidence > 0.7 ? '#22c55e' : '#94a3b8',
+            strokeWidth: Math.max(1, rel.confidence * 3),
+          },
+        })),
+    [relations, hiddenNodeIds]
+  );
 
-  const [nodes, setNodes] = useNodesState(initialNodes);
-  const [edges, setEdges] = useEdgesState(initialEdges);
+  const [nodes, setNodes] = useNodesState(rfNodes);
+  const [edges, setEdges] = useEdgesState(rfEdges);
 
-  // Update nodes when fileNodes change
+  // Update nodes when fileNodes change — smooth replacement, no fitView jump on drag.
   useEffect(() => {
-    setNodes(initialNodes);
-  }, [fileNodes, selectedNodeIds, setNodes]);
+    setNodes(rfNodes);
+  }, [rfNodes, setNodes]);
 
   // Update edges when relations change
   useEffect(() => {
-    setEdges(initialEdges);
-  }, [relations, setEdges]);
+    setEdges(rfEdges);
+  }, [rfEdges, setEdges]);
+
+  // Fit the view once per project load (not on every render) with a smooth transition.
+  useEffect(() => {
+    if (!currentProject) {
+      fitDoneForProjectRef.current = null;
+      return;
+    }
+    if (
+      fitDoneForProjectRef.current !== currentProject.id &&
+      rfNodes.length > 0 &&
+      !isLoading
+    ) {
+      fitDoneForProjectRef.current = currentProject.id;
+      // Defer to next frame so ReactFlow has nodes laid out.
+      const timer = setTimeout(() => {
+        fitView({ duration: 400, padding: 0.2 });
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [currentProject, rfNodes.length, isLoading, fitView]);
+
+  const fileNodeIds = useMemo(() => new Set(fileNodes.map((n) => n.id)), [fileNodes]);
 
   const onNodesChange: OnNodesChange<Node> = useCallback(
     (changes) => {
       setNodes((nds) => applyNodeChanges(changes, nds));
-      
-      // Handle position changes
+
+      // Handle position changes (use Set for O(1) lookup instead of Array.find)
       changes.forEach((change) => {
         if (change.type === 'position' && 'position' in change && change.position && !change.dragging) {
-          const node = fileNodes.find((n) => n.id === change.id);
-          if (node && 'position' in change && change.position) {
+          if (fileNodeIds.has(change.id) && change.position) {
             updateNodePosition(change.id, change.position.x, change.position.y);
           }
         }
       });
     },
-    [fileNodes, updateNodePosition, setNodes]
+    [fileNodeIds, updateNodePosition, setNodes]
   );
 
   const onSelectionChange = useCallback(
@@ -133,10 +167,22 @@ function CanvasContent() {
     [setSelectedNodeIds]
   );
 
+  // Loading state: show spinner while a project is loading.
+  if (currentProject && isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <div className="inline-block w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+          <p className="text-gray-500 dark:text-gray-400">加载项目中…</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!currentProject) {
     return (
-      <div className="flex items-center justify-center h-full bg-gray-50">
-        <div className="text-center text-gray-500">
+      <div className="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-900">
+        <div className="text-center text-gray-500 dark:text-gray-400">
           <div className="text-4xl mb-4">📁</div>
           <p className="text-lg">请从侧边栏选择或创建一个项目</p>
         </div>
@@ -161,7 +207,7 @@ function CanvasContent() {
     if (files.length === 0) return;
 
     if (!currentProject) {
-      alert('请先创建一个项目');
+      toast.error('请先创建一个项目');
       return;
     }
 
@@ -228,37 +274,41 @@ function CanvasContent() {
           </div>
         </div>
       )}
-      <ReactFlowProvider>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-          nodeTypes={nodeTypes}
-          fitView
-          snapToGrid
-          snapGrid={[15, 15]}
-          defaultViewport={viewport}
-          onMoveEnd={(_, vp) => setViewport(vp)}
-          onSelectionChange={onSelectionChange}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background color={darkMode ? '#374151' : '#e2e8f0'} gap={20} />
-          <Controls className={`shadow-md rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-white'}`} />
-          <MiniMap
-            className={`shadow-md rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-white'}`}
-            nodeColor={darkMode ? '#60a5fa' : '#3b82f6'}
-            maskColor={darkMode ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)'}
-            style={darkMode ? { border: '1px solid #4b5563' } : {}}
-          />
-        </ReactFlow>
-      </ReactFlowProvider>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        nodeTypes={nodeTypes}
+        snapToGrid
+        snapGrid={[15, 15]}
+        defaultViewport={viewport}
+        onMoveEnd={(_, vp) => setViewport(vp)}
+        onSelectionChange={onSelectionChange}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background color={darkMode ? '#374151' : '#e2e8f0'} gap={20} />
+        <Controls className={`shadow-md rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-white'}`} />
+        <MiniMap
+          className={`shadow-md rounded-lg ${darkMode ? 'bg-gray-800' : 'bg-white'}`}
+          nodeColor={darkMode ? '#60a5fa' : '#3b82f6'}
+          maskColor={darkMode ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)'}
+          style={darkMode ? { border: '1px solid #4b5563' } : {}}
+        />
+      </ReactFlow>
+
+      {/* Batch Operations Toolbar */}
+      <BatchToolbar />
     </div>
   );
 }
 
 // 导出的主组件
 export default function Canvas() {
-  return <CanvasContent />;
+  return (
+    <ReactFlowProvider>
+      <CanvasInner />
+    </ReactFlowProvider>
+  );
 }

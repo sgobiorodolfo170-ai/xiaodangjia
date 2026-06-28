@@ -4,6 +4,11 @@ import * as api from '../../services/api';
 import { listen } from '@tauri-apps/api/event';
 import { FileNode } from '../../types';
 import FileTree from './FileTree';
+import { FavoritesTagsPanel } from './FavoritesTagsPanel';
+import { SearchFilterPanel } from './SearchFilterPanel';
+import { StatsPanel } from './StatsPanel';
+import { BackupPanel } from './BackupPanel';
+import toast from 'react-hot-toast';
 
 export default function Sidebar() {
   const {
@@ -18,6 +23,7 @@ export default function Sidebar() {
     fileNodes,
     setSelectedNodeIds,
     setViewport,
+    clearProjectState,
   } = useAppStore();
 
   const [newProjectName, setNewProjectName] = useState('');
@@ -25,6 +31,16 @@ export default function Sidebar() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FileNode[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showFavoritesPanel, setShowFavoritesPanel] = useState(false);
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [showStatsPanel, setShowStatsPanel] = useState(false);
+  const [showBackupPanel, setShowBackupPanel] = useState(false);
+  
+  // 新建项目相关状态
+  const [folderSource, setFolderSource] = useState<'existing' | 'new'>('existing');
+  const [parentFolderPath, setParentFolderPath] = useState('');
+  const [newFolderName, setNewFolderName] = useState('');
+  
   const rescanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -40,22 +56,40 @@ export default function Sidebar() {
     }
   };
 
-  // Debounced re-scan on file changes
+  // Debounced re-scan on file changes — incremental merge to preserve user layout
   const debouncedRescan = useCallback(async () => {
     if (rescanTimerRef.current) {
       clearTimeout(rescanTimerRef.current);
     }
     rescanTimerRef.current = setTimeout(async () => {
-      if (currentProject) {
-        try {
-          const nodes = await api.scanDirectory(currentProject.id, currentProject.rootPath);
-          setFileNodes(nodes);
-        } catch (e) {
-          console.warn('Rescan failed:', e);
+      if (!currentProject) return;
+      try {
+        const freshNodes = await api.scanDirectory(currentProject.id, currentProject.rootPath);
+        // Build a path→existing-node map to preserve user layout
+        const existingMap = new Map<string, FileNode>();
+        for (const node of fileNodes) {
+          existingMap.set(node.path, node);
         }
+        // Merge: keep existing positionX/Y/isCollapsed/tags, update size/modifiedAt,
+        // add new nodes (at scan-assigned positions), remove deleted nodes
+        const merged: FileNode[] = freshNodes.map((fresh) => {
+          const existing = existingMap.get(fresh.path);
+          if (existing) {
+            return {
+              ...fresh,
+              positionX: existing.positionX,
+              positionY: existing.positionY,
+              isCollapsed: existing.isCollapsed,
+            };
+          }
+          return fresh; // new node — keep scan-assigned position
+        });
+        setFileNodes(merged);
+      } catch (e) {
+        console.warn('Rescan failed:', e);
       }
     }, 2000); // 2s debounce
-  }, [currentProject, setFileNodes]);
+  }, [currentProject, fileNodes, setFileNodes]);
 
   // 监听文件变更，自动刷新画布
   useEffect(() => {
@@ -85,14 +119,22 @@ export default function Sidebar() {
       if (rescanTimerRef.current) {
         clearTimeout(rescanTimerRef.current);
       }
+      // Stop the watcher when switching away from this project
+      if (currentProject) {
+        api.stopFileWatcher(currentProject.id).catch((e) => {
+          console.warn('Failed to stop watcher:', e);
+        });
+      }
     };
   }, [currentProject?.id]);
 
   const handleSelectProject = async (project: typeof projects[0]) => {
-    setCurrentProject(project);
+    clearProjectState();
+    setFileNodes([]);
     setIsLoading(true);
     try {
       const nodes = await api.scanDirectory(project.id, project.rootPath);
+      setCurrentProject(project);
       setFileNodes(nodes);
       setSearchResults([]);
       setSearchQuery('');
@@ -103,24 +145,93 @@ export default function Sidebar() {
     }
   };
 
+  // 选择父目录
+  const handleSelectParentFolder = async () => {
+    try {
+      const selected = await api.openDirectoryDialog();
+      if (selected) {
+        setParentFolderPath(selected);
+      }
+    } catch (error) {
+      console.error('Failed to select parent folder:', error);
+    }
+  };
+
+  // 判断是否可以创建项目
+  const canCreateProject = () => {
+    if (!newProjectName.trim()) return false;
+    if (folderSource === 'existing') return true;
+    if (folderSource === 'new') return parentFolderPath && newFolderName.trim();
+    return false;
+  };
+
+  // 快速创建项目：直接弹出文件夹选择对话框，使用文件夹名作为项目名
+  const handleQuickCreateProject = async () => {
+    try {
+      const selectedPath = await api.openDirectoryDialog();
+      if (!selectedPath) return;
+
+      // 从路径中提取文件夹名作为项目名
+      const pathParts = selectedPath.replace(/\\/g, '/').split('/');
+      const folderName = pathParts[pathParts.length - 1] || '新项目';
+
+      setIsLoading(true);
+
+      // 创建项目
+      const project = await api.createProject(folderName, selectedPath);
+      setProjects([project, ...projects]);
+      setCurrentProject(project);
+
+      // 扫描目录
+      const nodes = await api.scanDirectory(project.id, project.rootPath);
+      setFileNodes(nodes);
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      setIsLoading(false);
+    }
+  };
+
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
 
     try {
-      const selected = await api.openDirectoryDialog();
+      let rootPath: string;
 
-      if (selected) {
+      if (folderSource === 'new') {
+        // 创建新文件夹模式：直接使用已选择的路径
+        // Windows 路径拼接
+        rootPath = parentFolderPath.endsWith('\\') 
+          ? parentFolderPath + newFolderName 
+          : parentFolderPath + '\\' + newFolderName;
+        
         setIsLoading(true);
-        const project = await api.createProject(newProjectName, selected);
-        setProjects([project, ...projects]);
-        setCurrentProject(project);
-        setNewProjectName('');
-        setShowNewProject(false);
-
-        const nodes = await api.scanDirectory(project.id, project.rootPath);
-        setFileNodes(nodes);
-        setIsLoading(false);
+        // 先创建文件夹
+        await api.createDirectory(rootPath);
+      } else {
+        // 选择已有文件夹模式：弹出对话框让用户选择
+        const selected = await api.openDirectoryDialog();
+        if (!selected) return;
+        rootPath = selected;
+        setIsLoading(true);
       }
+
+      // 创建项目
+      const project = await api.createProject(newProjectName, rootPath);
+      setProjects([project, ...projects]);
+      setCurrentProject(project);
+      
+      // 重置表单状态
+      setNewProjectName('');
+      setShowNewProject(false);
+      setFolderSource('existing');
+      setParentFolderPath('');
+      setNewFolderName('');
+
+      // 扫描目录
+      const nodes = await api.scanDirectory(project.id, project.rootPath);
+      setFileNodes(nodes);
+      setIsLoading(false);
     } catch (error) {
       console.error('Failed to create project:', error);
       setIsLoading(false);
@@ -164,10 +275,10 @@ export default function Sidebar() {
     try {
       const rels = await api.analyzeFileRelations(currentProject.id);
       setRelations(rels);
-      alert(`分析完成，发现 ${rels.length} 个文件关联`);
+      toast.success(`分析完成，发现 ${rels.length} 个文件关联`);
     } catch (error) {
       console.error('Analysis failed:', error);
-      alert('分析失败');
+      toast.error('分析失败');
     } finally {
       setIsLoading(false);
     }
@@ -243,9 +354,114 @@ export default function Sidebar() {
         </div>
       )}
 
+      {/* Favorites/Tags Toggle */}
+      <div className="p-2 border-b border-gray-700 flex gap-2 flex-wrap">
+        {currentProject && (
+          <>
+            <button
+              onClick={() => {
+                setShowFavoritesPanel(!showFavoritesPanel);
+                setShowAdvancedSearch(false);
+                setShowStatsPanel(false);
+                setShowBackupPanel(false);
+              }}
+              className={`flex-1 px-2 py-2 rounded text-sm flex items-center justify-center gap-2 transition-all min-w-[80px] ${
+                showFavoritesPanel 
+                  ? 'bg-yellow-600 text-white' 
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              <span>⭐</span>
+              <span>收藏</span>
+            </button>
+            <button
+              onClick={() => {
+                setShowAdvancedSearch(!showAdvancedSearch);
+                setShowFavoritesPanel(false);
+                setShowStatsPanel(false);
+                setShowBackupPanel(false);
+              }}
+              className={`flex-1 px-2 py-2 rounded text-sm flex items-center justify-center gap-2 transition-all min-w-[80px] ${
+                showAdvancedSearch 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              <span>🔍</span>
+              <span>搜索</span>
+            </button>
+            <button
+              onClick={() => {
+                setShowStatsPanel(!showStatsPanel);
+                setShowFavoritesPanel(false);
+                setShowAdvancedSearch(false);
+                setShowBackupPanel(false);
+              }}
+              className={`flex-1 px-2 py-2 rounded text-sm flex items-center justify-center gap-2 transition-all min-w-[80px] ${
+                showStatsPanel 
+                  ? 'bg-purple-600 text-white' 
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              <span>📊</span>
+              <span>统计</span>
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => {
+            setShowBackupPanel(!showBackupPanel);
+            setShowFavoritesPanel(false);
+            setShowAdvancedSearch(false);
+            setShowStatsPanel(false);
+          }}
+          className={`flex-1 px-2 py-2 rounded text-sm flex items-center justify-center gap-2 transition-all min-w-[80px] ${
+            showBackupPanel 
+              ? 'bg-teal-600 text-white' 
+              : 'bg-gray-700 hover:bg-gray-600'
+          }`}
+        >
+          <span>💾</span>
+          <span>备份</span>
+        </button>
+      </div>
+
+      {/* Advanced Search Panel */}
+      {showAdvancedSearch && (
+        <SearchFilterPanel onResults={(results) => {
+          setSearchResults(results);
+          setSearchQuery('');
+        }} />
+      )}
+
+      {/* Stats Panel */}
+      {showStatsPanel && (
+        <div className="flex-1 overflow-hidden">
+          <StatsPanel />
+        </div>
+      )}
+
+      {/* Backup Panel */}
+      {showBackupPanel && (
+        <div className="flex-1 overflow-hidden">
+          <BackupPanel />
+        </div>
+      )}
+
       {/* File Tree */}
-      {currentProject && fileNodes.length > 0 && (
+      {currentProject && fileNodes.length > 0 && !showFavoritesPanel && (
         <FileTree nodes={fileNodes} />
+      )}
+
+      {/* Favorites/Tags Panel */}
+      {currentProject && showFavoritesPanel && (
+        <div className="flex-1 overflow-hidden">
+          <FavoritesTagsPanel 
+            onFileSelect={(fileId) => {
+              handleSearchResultClick(fileNodes.find(n => n.id === fileId)!);
+            }}
+          />
+        </div>
       )}
 
       {/* Search Results */}
@@ -271,13 +487,22 @@ export default function Sidebar() {
       <div className="flex-1 overflow-y-auto p-2">
         <div className="flex items-center justify-between px-2 py-2">
           <span className="text-sm text-gray-400">项目列表</span>
-          <button
-            onClick={() => setShowNewProject(true)}
-            className="text-lg hover:text-blue-400 transition-colors"
-            title="新建项目"
-          >
-            +
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleQuickCreateProject}
+              className="text-sm bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded transition-colors"
+              title="选择文件夹创建项目"
+            >
+              + 添加项目
+            </button>
+            <button
+              onClick={() => setShowNewProject(true)}
+              className="text-lg hover:text-blue-400 transition-colors"
+              title="新建项目"
+            >
+              ⚙
+            </button>
+          </div>
         </div>
 
         {showNewProject && (
@@ -291,10 +516,74 @@ export default function Sidebar() {
               onKeyDown={(e) => e.key === 'Enter' && handleCreateProject()}
               autoFocus
             />
+            
+            {/* 文件夹来源选择 */}
+            <div className="mb-2 text-sm text-gray-300">
+              <div className="mb-1">文件夹来源:</div>
+              <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                <input
+                  type="radio"
+                  name="folderSource"
+                  checked={folderSource === 'existing'}
+                  onChange={() => {
+                    setFolderSource('existing');
+                    setParentFolderPath('');
+                    setNewFolderName('');
+                  }}
+                  className="accent-blue-500"
+                />
+                选择已有文件夹
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer hover:text-white">
+                <input
+                  type="radio"
+                  name="folderSource"
+                  checked={folderSource === 'new'}
+                  onChange={() => setFolderSource('new')}
+                  className="accent-blue-500"
+                />
+                创建新文件夹
+              </label>
+            </div>
+            
+            {/* 选择已有文件夹时 */}
+            {folderSource === 'existing' && (
+              <div className="mb-2 text-xs text-gray-400">
+                点击"创建"后将弹出文件夹选择对话框
+              </div>
+            )}
+            
+            {/* 创建新文件夹时 */}
+            {folderSource === 'new' && (
+              <div className="space-y-2 mb-2">
+                <button
+                  type="button"
+                  onClick={handleSelectParentFolder}
+                  className="w-full px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-left"
+                >
+                  {parentFolderPath ? `父目录: ${parentFolderPath}` : '点击选择父目录'}
+                </button>
+                {parentFolderPath && (
+                  <input
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="新文件夹名称"
+                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500"
+                  />
+                )}
+              </div>
+            )}
+            
             <div className="flex gap-2">
               <button
                 onClick={handleCreateProject}
-                className="flex-1 px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+                disabled={!canCreateProject()}
+                className={`flex-1 px-2 py-1 rounded text-sm transition-colors ${
+                  canCreateProject() 
+                    ? 'bg-blue-600 hover:bg-blue-700' 
+                    : 'bg-gray-600 cursor-not-allowed'
+                }`}
               >
                 创建
               </button>
@@ -302,6 +591,9 @@ export default function Sidebar() {
                 onClick={() => {
                   setShowNewProject(false);
                   setNewProjectName('');
+                  setFolderSource('existing');
+                  setParentFolderPath('');
+                  setNewFolderName('');
                 }}
                 className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
               >

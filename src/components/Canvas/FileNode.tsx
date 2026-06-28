@@ -1,7 +1,9 @@
 ﻿import { memo, useState, useRef, useEffect } from 'react';
-import { Handle, Position, NodeProps } from '@xyflow/react';
+import { Handle, Position, Node, NodeProps } from '@xyflow/react';
 import { FileNode as FileNodeType } from '../../types';
 import { useAppStore } from '../../stores/appStore';
+import * as api from '../../services/api';
+import toast from 'react-hot-toast';
 
 // File type icons
 const getFileIcon = (extension: string, isDirectory: boolean): string => {
@@ -31,8 +33,19 @@ const formatSize = (bytes: number): string => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-function FileNodeComponent({ data, selected }: NodeProps) {
-  const nodeData = data as unknown as FileNodeType;
+/** Format unknown error values into a human-readable string. */
+const formatError = (e: unknown): string => {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+};
+
+function FileNodeComponent({ data, selected }: NodeProps<FileNodeType>) {
+  const nodeData = data;
   const { openTab, removeFileNode, updateFileNode } = useAppStore();
   
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -67,9 +80,58 @@ function FileNodeComponent({ data, selected }: NodeProps) {
     setContextMenu(null);
   };
 
-  const handleDelete = () => {
-    if (confirm(`确定要删除 "${nodeData.name}" 吗？`)) {
-      removeFileNode(nodeData.id);
+  const handleMove = async () => {
+    try {
+      const dest = await api.openDirectoryDialog();
+      if (dest) {
+        const newPath = dest + (dest.endsWith('\\') ? '' : '\\') + nodeData.name;
+        await api.moveFile(nodeData.path, newPath, nodeData.projectId);
+        // 更新节点路径
+        updateFileNode(nodeData.id, { path: newPath });
+        toast.success('文件已移动');
+      }
+    } catch (e) {
+      toast.error('移动失败: ' + formatError(e));
+    }
+    setContextMenu(null);
+  };
+
+  const handleCopy = async () => {
+    try {
+      const dest = await api.openDirectoryDialog();
+      if (dest) {
+        const newPath = dest + (dest.endsWith('\\') ? '' : '\\') + nodeData.name;
+        await api.copyFile(nodeData.path, newPath, nodeData.projectId);
+        toast.success('文件已复制');
+      }
+    } catch (e) {
+      toast.error('复制失败: ' + formatError(e));
+    }
+    setContextMenu(null);
+  };
+
+  const handleTrash = async () => {
+    if (confirm(`确定要将 "${nodeData.name}" 移到回收站吗？`)) {
+      try {
+        await api.trashFile(nodeData.path, nodeData.projectId);
+        removeFileNode(nodeData.id);
+        toast.success('已移到回收站');
+      } catch (e) {
+        toast.error('删除失败: ' + formatError(e));
+      }
+    }
+    setContextMenu(null);
+  };
+
+  const handleDeletePermanent = async () => {
+    if (confirm(`确定要永久删除 "${nodeData.name}" 吗？此操作不可恢复！`)) {
+      try {
+        await api.deleteFilePermanent(nodeData.path, nodeData.projectId);
+        removeFileNode(nodeData.id);
+        toast.success('已永久删除');
+      } catch (e) {
+        toast.error('删除失败: ' + formatError(e));
+      }
     }
     setContextMenu(null);
   };
@@ -159,7 +221,7 @@ function FileNodeComponent({ data, selected }: NodeProps) {
       {contextMenu && (
         <div
           ref={menuRef}
-          className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[160px]"
+          className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[180px]"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
@@ -176,10 +238,29 @@ function FileNodeComponent({ data, selected }: NodeProps) {
           </button>
           <hr className="my-1 border-gray-200" />
           <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
-            onClick={handleDelete}
+            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+            onClick={handleMove}
           >
-            <span>🗑️</span> 删除
+            <span>📦</span> 移动到...
+          </button>
+          <button
+            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+            onClick={handleCopy}
+          >
+            <span>📑</span> 复制到...
+          </button>
+          <hr className="my-1 border-gray-200" />
+          <button
+            className="w-full px-4 py-2 text-left text-sm hover:bg-yellow-50 text-yellow-600 flex items-center gap-2"
+            onClick={handleTrash}
+          >
+            <span>🗑️</span> 移到回收站
+          </button>
+          <button
+            className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center gap-2"
+            onClick={handleDeletePermanent}
+          >
+            <span>❌</span> 永久删除
           </button>
         </div>
       )}

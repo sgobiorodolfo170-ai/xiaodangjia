@@ -2,6 +2,25 @@
 // This is a lightweight regex-based solution that handles 90% of common cases
 
 use regex::Regex;
+use std::sync::OnceLock;
+
+fn regex(pattern: &str) -> &'static Regex {
+    static RE_CACHE: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
+    let cache = RE_CACHE.get_or_init(Vec::new);
+    // Linear scan is fine ? this is called O(10) times total, not per-file.
+    if let Some(found) = cache.iter().find(|(p, _)| *p == pattern) {
+        return &found.1;
+    }
+    unreachable!("regex pattern not pre-registered")
+}
+
+macro_rules! cached_re {
+    ($name:ident, $pattern:expr) => {{
+        static $name: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        $name.get_or_init(|| Regex::new($pattern).unwrap())
+    }};
+}
+
 
 /// Parse a file and extract all import/require statements
 /// Returns a list of imported module names
@@ -11,7 +30,7 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
     match extension.to_lowercase().as_str() {
         "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => {
             // JavaScript/TypeScript imports
-            let ts_import_re = Regex::new(r#"import\s+(?:[\w*{}\s,]+\s+from\s+)?['"]([@\w\-./]+)['"]"#).unwrap();
+            let ts_import_re = cached_re!(TS_IMPORT_RE, r#"import\s+(?:[\w*{}\s,]+\s+from\s+)?['"]([@\w\-./]+)['"]"#);
             for cap in ts_import_re.captures_iter(content) {
                 if let Some(m) = cap.get(1) {
                     let module = m.as_str().to_string();
@@ -23,7 +42,7 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
             }
 
             // Require statements
-            let require_re = Regex::new(r#"require\s*\(\s*['"]([@\w\-./]+)['"]\s*\)"#).unwrap();
+            let require_re = cached_re!(REQUIRE_RE, r#"require\s*\(\s*['"]([@\w\-./]+)['"]\s*\)"#);
             for cap in require_re.captures_iter(content) {
                 if let Some(m) = cap.get(1) {
                     let module = m.as_str().to_string();
@@ -34,7 +53,7 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
             }
 
             // ES6 export from - fixed regex
-            let es6_re = Regex::new(r#"export\s+(?:\{\s*)?([\w,\s]+)(?:\s*\})?\s+from\s+['"]([@\w\-./]+)['"]"#).unwrap();
+            let es6_re = cached_re!(ES6_RE, r#"export\s+(?:\{\s*)?([\w,\s]+)(?:\s*\})?\s+from\s+['"]([@\w\-./]+)['"]"#);
             for cap in es6_re.captures_iter(content) {
                 if let Some(m) = cap.get(2) {
                     let module = m.as_str().to_string();
@@ -46,7 +65,7 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
         }
         "py" => {
             // Python imports
-            let python_import_re = Regex::new(r#"(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))"#).unwrap();
+            let python_import_re = cached_re!(PYTHON_IMPORT_RE, r#"(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))"#);
             for cap in python_import_re.captures_iter(content) {
                 if let Some(m) = cap.get(1) {
                     let module = m.as_str().to_string();
@@ -59,7 +78,7 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
         }
         "rs" => {
             // Rust imports - fixed to match multiple items
-            let rust_use_re = Regex::new(r#"use\s+([\w:]+)"#).unwrap();
+            let rust_use_re = cached_re!(RUST_USE_RE, r#"use\s+([\w:]+)"#);
             for cap in rust_use_re.captures_iter(content) {
                 if let Some(m) = cap.get(1) {
                     let module = m.as_str().to_string();
@@ -72,14 +91,14 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
         }
         "go" => {
             // Go imports - fixed to match both forms
-            let go_import_re = Regex::new(r#"import\s+(?:\(\s*)?["']([@\w\-./]+)["']"#).unwrap();
+            let go_import_re = cached_re!(GO_IMPORT_RE_RE, r#"import\s+(?:\(\s*)?["']([@\w\-./]+)["']"#);
             for cap in go_import_re.captures_iter(content) {
                 if let Some(m) = cap.get(1) {
                     imports.push(m.as_str().to_string());
                 }
             }
             // Also match import with alias: import alias "package"
-            let go_alias_re = Regex::new(r#"import\s+(\w+)\s+["']([@\w\-./]+)["']"#).unwrap();
+            let go_alias_re = cached_re!(GO_ALIAS_RE_RE, r#"import\s+(\w+)\s+["']([@\w\-./]+)["']"#);
             for cap in go_alias_re.captures_iter(content) {
                 if let Some(m) = cap.get(2) {
                     imports.push(m.as_str().to_string());
@@ -88,7 +107,7 @@ pub fn parse_imports(content: &str, extension: &str) -> Vec<String> {
         }
         "java" | "kt" => {
             // Java/Kotlin imports
-            let java_import_re = Regex::new(r#"import\s+([\w.]+)"#).unwrap();
+            let java_import_re = cached_re!(JAVA_IMPORT_RE, r#"import\s+([\w.]+)"#);
             for cap in java_import_re.captures_iter(content) {
                 if let Some(m) = cap.get(1) {
                     let module = m.as_str().to_string();
@@ -133,6 +152,16 @@ pub fn analyze_import_relations(
     }
 
     relations
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportRelationResult {
+    pub source_id: String,
+    pub source_name: String,
+    pub target_id: String,
+    pub target_name: String,
+    pub confidence: f64,
 }
 
 #[cfg(test)]

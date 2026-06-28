@@ -280,8 +280,17 @@ impl Default for ArchiveRecommender {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingSimilarityResult {
+    pub id: String,
+    pub name: String,
+    pub score: f64,
+}
+
 /// Archive location suggestion
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ArchiveSuggestion {
     pub directory: String,
     pub confidence: f64,

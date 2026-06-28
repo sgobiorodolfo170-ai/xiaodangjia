@@ -165,6 +165,14 @@ impl Default for TfidfIndex {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TfidfSimilarityResult {
+    pub id: String,
+    pub name: String,
+    pub score: f64,
+}
+
 /// Simple content-based similarity (without building full index)
 /// More efficient for on-the-fly comparisons
 pub fn compute_content_similarity(content1: &str, content2: &str) -> f64 {

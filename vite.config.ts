@@ -9,6 +9,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  // Use relative asset paths so the build output works whether it is served
+  // from the Tauri webview (http://tauri.localhost), a static host, or opened
+  // directly via file://. Absolute paths ("/assets/...") resolve to the root
+  // of the drive under file:// and are blocked by CORS, causing a blank page.
+  base: './',
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   clearScreen: false,
   server: {

@@ -15,8 +15,8 @@ export interface FileNode {
   name: string;
   extension: string;
   size: number;
-  createdAt: string;
-  modifiedAt: string;
+  createdAt: string | null;
+  modifiedAt: string | null;
   tags: string[];
   parentId: string | null;
   positionX: number;
@@ -27,7 +27,6 @@ export interface FileNode {
   relatedFiles: string[];
 }
 
-// 文件关联
 export interface FileRelation {
   id: string;
   projectId: string;
@@ -37,7 +36,6 @@ export interface FileRelation {
   confidence: number;
 }
 
-// 文件内容
 export interface FileContent {
   path: string;
   content: string;
@@ -45,7 +43,6 @@ export interface FileContent {
   size: number;
 }
 
-// 打开的标签页
 export interface OpenTab {
   id: string;
   fileId: string;
@@ -53,11 +50,31 @@ export interface OpenTab {
   name: string;
   type: 'viewer' | 'editor';
   isModified: boolean;
+  content?: string;  // persisted editor content so switching tabs doesn't lose edits
 }
 
-// 画布视口
 export interface Viewport {
   x: number;
   y: number;
   zoom: number;
+}
+
+export interface SimilarityResult {
+  id: string;
+  score: number;
+}
+
+export interface ArchiveSuggestion {
+  directory: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface PluginMetadata {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  enabled: boolean;
 }
