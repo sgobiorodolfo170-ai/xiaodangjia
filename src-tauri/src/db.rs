@@ -804,6 +804,27 @@ mod tests {
         Database::new(dir).expect("Failed to create test DB")
     }
 
+    fn make_node(id: &str, project_id: &str, name: &str, ext: &str) -> FileNode {
+        FileNode {
+            id: id.to_string(),
+            project_id: project_id.to_string(),
+            path: format!("/tmp/test/{}", name),
+            name: name.to_string(),
+            extension: ext.to_string(),
+            size: 1024,
+            created_at: None,
+            modified_at: None,
+            tags: vec![],
+            parent_id: None,
+            position_x: 0.0,
+            position_y: 0.0,
+            is_collapsed: false,
+            is_directory: false,
+            children: Vec::new(),
+            related_files: Vec::new(),
+        }
+    }
+
     #[test]
     fn test_create_project() {
         let db = create_test_db();
@@ -851,24 +872,8 @@ mod tests {
         let db = create_test_db();
         let project = db.create_project("test", "/tmp/test").unwrap();
 
-        let node = FileNode {
-            id: "node-1".to_string(),
-            project_id: project.id.clone(),
-            path: "/tmp/test/main.ts".to_string(),
-            name: "main.ts".to_string(),
-            extension: "ts".to_string(),
-            size: 1024,
-            created_at: None,
-            modified_at: None,
-            tags: vec!["TypeScript".to_string()],
-            parent_id: None,
-            position_x: 0.0,
-            position_y: 0.0,
-            is_collapsed: false,
-            is_directory: false,
-            children: Vec::new(),
-            related_files: Vec::new(),
-        };
+        let mut node = make_node("node-1", &project.id, "main.ts", "ts");
+        node.tags = vec!["TypeScript".to_string()];
 
         db.insert_file_node(&node).unwrap();
         let nodes = db.get_file_nodes_by_project(&project.id).unwrap();
@@ -882,25 +887,7 @@ mod tests {
         let db = create_test_db();
         let project = db.create_project("test", "/tmp/test").unwrap();
 
-        let node = FileNode {
-            id: "node-1".to_string(),
-            project_id: project.id.clone(),
-            path: "/tmp/test/main.ts".to_string(),
-            name: "main.ts".to_string(),
-            extension: "ts".to_string(),
-            size: 1024,
-            created_at: None,
-            modified_at: None,
-            tags: vec![],
-            parent_id: None,
-            position_x: 0.0,
-            position_y: 0.0,
-            is_collapsed: false,
-            is_directory: false,
-            children: Vec::new(),
-            related_files: Vec::new(),
-        };
-
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
         db.insert_file_node(&node).unwrap();
         db.update_node_position("node-1", 100.0, 200.0).unwrap();
 
@@ -914,25 +901,7 @@ mod tests {
         let db = create_test_db();
         let project = db.create_project("test", "/tmp/test").unwrap();
 
-        let node = FileNode {
-            id: "node-1".to_string(),
-            project_id: project.id.clone(),
-            path: "/tmp/test/main.ts".to_string(),
-            name: "main.ts".to_string(),
-            extension: "ts".to_string(),
-            size: 1024,
-            created_at: None,
-            modified_at: None,
-            tags: vec![],
-            parent_id: None,
-            position_x: 0.0,
-            position_y: 0.0,
-            is_collapsed: false,
-            is_directory: false,
-            children: Vec::new(),
-            related_files: Vec::new(),
-        };
-
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
         db.insert_file_node(&node).unwrap();
         db.delete_file_nodes_by_project(&project.id).unwrap();
 
@@ -953,29 +922,259 @@ mod tests {
         let db = create_test_db();
         let project = db.create_project("test", "/tmp/test").unwrap();
 
-        let node = FileNode {
-            id: "node-1".to_string(),
-            project_id: project.id.clone(),
-            path: "/tmp/test/main.ts".to_string(),
-            name: "main.ts".to_string(),
-            extension: "ts".to_string(),
-            size: 1024,
-            created_at: None,
-            modified_at: None,
-            tags: vec![],
-            parent_id: None,
-            position_x: 0.0,
-            position_y: 0.0,
-            is_collapsed: false,
-            is_directory: false,
-            children: Vec::new(),
-            related_files: Vec::new(),
-        };
-
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
         db.insert_file_node(&node).unwrap();
         db.delete_project(&project.id).unwrap();
 
         let nodes = db.get_file_nodes_by_project(&project.id).unwrap();
         assert_eq!(nodes.len(), 0);
+    }
+
+    #[test]
+    fn test_add_and_get_favorites() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        db.add_favorite(&project.id, "node-1").unwrap();
+        let favs = db.get_favorites(&project.id).unwrap();
+        assert_eq!(favs, vec!["node-1"]);
+    }
+
+    #[test]
+    fn test_add_remove_favorite() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        db.add_favorite(&project.id, "node-1").unwrap();
+        db.remove_favorite(&project.id, "node-1").unwrap();
+        let favs = db.get_favorites(&project.id).unwrap();
+        assert!(favs.is_empty());
+    }
+
+    #[test]
+    fn test_is_favorite() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        assert!(!db.is_favorite(&project.id, "node-1").unwrap());
+        db.add_favorite(&project.id, "node-1").unwrap();
+        assert!(db.is_favorite(&project.id, "node-1").unwrap());
+    }
+
+    #[test]
+    fn test_create_and_list_tags() {
+        let db = create_test_db();
+        let tag = db.create_tag("rust", "#ff0000").unwrap();
+        assert_eq!(tag.name, "rust");
+        assert_eq!(tag.color, "#ff0000");
+
+        let tags = db.list_tags().unwrap();
+        assert_eq!(tags.len(), 1);
+    }
+
+    #[test]
+    fn test_delete_tag() {
+        let db = create_test_db();
+        let tag = db.create_tag("rust", "#ff0000").unwrap();
+        db.delete_tag(&tag.id).unwrap();
+        let tags = db.list_tags().unwrap();
+        assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_add_and_get_file_tags() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        let tag = db.create_tag("typescript", "#3178c6").unwrap();
+        db.add_file_tag("node-1", &tag.id).unwrap();
+
+        let file_tags = db.get_file_tags("node-1").unwrap();
+        assert_eq!(file_tags.len(), 1);
+        assert_eq!(file_tags[0].name, "typescript");
+    }
+
+    #[test]
+    fn test_remove_file_tag() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        let tag = db.create_tag("typescript", "#3178c6").unwrap();
+        db.add_file_tag("node-1", &tag.id).unwrap();
+        db.remove_file_tag("node-1", &tag.id).unwrap();
+
+        let file_tags = db.get_file_tags("node-1").unwrap();
+        assert!(file_tags.is_empty());
+    }
+
+    #[test]
+    fn test_get_file_node_by_id() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        let fetched = db.get_file_node_by_id("node-1").unwrap().expect("Not found");
+        assert_eq!(fetched.name, "main.ts");
+    }
+
+    #[test]
+    fn test_get_file_node_by_id_not_found() {
+        let db = create_test_db();
+        let result = db.get_file_node_by_id("nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_delete_file_node_by_path() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        db.delete_file_node_by_path("/tmp/test/main.ts").unwrap();
+        let nodes = db.get_file_nodes_by_project(&project.id).unwrap();
+        assert!(nodes.is_empty());
+    }
+
+    #[test]
+    fn test_update_file_node_path() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        db.update_file_node_path("/tmp/test/main.ts", "/tmp/test/utils.ts", "utils.ts", "ts").unwrap();
+        let nodes = db.get_file_nodes_by_project(&project.id).unwrap();
+        assert_eq!(nodes[0].name, "utils.ts");
+    }
+
+    #[test]
+    fn test_insert_file_nodes_batch() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+
+        let nodes = vec![
+            make_node("n1", &project.id, "a.ts", "ts"),
+            make_node("n2", &project.id, "b.ts", "ts"),
+        ];
+        db.insert_file_nodes_batch(&nodes).unwrap();
+
+        let stored = db.get_file_nodes_by_project(&project.id).unwrap();
+        assert_eq!(stored.len(), 2);
+    }
+
+    #[test]
+    fn test_replace_file_nodes() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+
+        let old = make_node("n1", &project.id, "a.ts", "ts");
+        db.insert_file_node(&old).unwrap();
+
+        let new = make_node("n2", &project.id, "b.rs", "rs");
+        db.replace_file_nodes(&project.id, &[new]).unwrap();
+
+        let stored = db.get_file_nodes_by_project(&project.id).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].name, "b.rs");
+    }
+
+    #[test]
+    fn test_upsert_and_get_file_embedding() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        let emb = vec![0.1, 0.2, 0.3, 0.4];
+        db.upsert_file_embedding("node-1", &emb).unwrap();
+
+        let stored = db.get_file_embedding("node-1").unwrap();
+        assert!(stored.is_some());
+        assert!((stored.as_ref().unwrap()[0] - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_get_file_embedding_not_found() {
+        let db = create_test_db();
+        let result = db.get_file_embedding("nonexistent").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_project_embeddings() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        let emb = vec![0.5, 0.6];
+        db.upsert_file_embedding("node-1", &emb).unwrap();
+
+        let project_embs = db.get_project_embeddings(&project.id).unwrap();
+        assert_eq!(project_embs.len(), 1);
+        assert_eq!(project_embs[0].0, "node-1");
+    }
+
+    #[test]
+    fn test_prune_stale_embeddings() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+        db.upsert_file_embedding("node-1", &[0.1]).unwrap();
+        // Insert an embedding referencing a non-existent node by disabling FK temporarily
+        db.conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+        db.conn.execute(
+            "INSERT OR IGNORE INTO file_embeddings (file_id, embedding, updated_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["stale-node", "[0.2]", "2024-01-01"],
+        ).unwrap();
+        db.conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+
+        let pruned = db.prune_stale_embeddings(&project.id).unwrap();
+        assert_eq!(pruned, 1);
+
+        let remaining = db.get_project_embeddings(&project.id).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].0, "node-1");
+    }
+
+    #[test]
+    fn test_list_tags_by_project() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        let tag = db.create_tag("frontend", "#blue").unwrap();
+        db.add_file_tag("node-1", &tag.id).unwrap();
+
+        let project_tags = db.list_tags_by_project(&project.id).unwrap();
+        assert_eq!(project_tags.len(), 1);
+        assert_eq!(project_tags[0].name, "frontend");
+    }
+
+    #[test]
+    fn test_add_favorite_duplicate_is_idempotent() {
+        let db = create_test_db();
+        let project = db.create_project("test", "/tmp/test").unwrap();
+        let node = make_node("node-1", &project.id, "main.ts", "ts");
+        db.insert_file_node(&node).unwrap();
+
+        db.add_favorite(&project.id, "node-1").unwrap();
+        db.add_favorite(&project.id, "node-1").unwrap();
+        let favs = db.get_favorites(&project.id).unwrap();
+        assert_eq!(favs.len(), 1);
     }
 }
