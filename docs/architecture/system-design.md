@@ -110,11 +110,14 @@ interface FileNode {
 **职责**: 文件分析、关联发现、归档建议
 
 **Agent 能力**:
-1. **文件理解**: 读取文件内容，生成向量嵌入
-2. **关联分析**: 查找相似/相关文件，建立关联索引
-3. **自动归档**: 建议文件归属目录
-4. **标签生成**: 基于内容生成描述性标签
-5. **智能搜索**: 自然语言搜索文件
+1. **文件理解**: 读取文件内容，生成向量嵌入 (semantic_embedding.rs)
+2. **关联分析**: 查找相似/相关文件，建立关联索引 (watcher.rs + ast_parser.rs)
+3. **自动归档**: 建议文件归属目录 (semantic_embedding.rs ArchiveRecommender)
+4. **标签生成**: 基于内容生成描述性标签 (watcher.rs)
+5. **智能搜索**: 自然语言搜索文件 (watcher.rs + semantic_search.rs)
+6. **内容相似度**: TF-IDF 基于内容计算文件相似性 (tfidf.rs)
+7. **AST 解析**: 解析代码文件 import 依赖关系 (ast_parser.rs)
+8. **插件系统**: 可扩展的插件框架 (plugin_system.rs)
 
 ## 4. 画布交互设计
 
@@ -181,7 +184,12 @@ xiaodangjia/
 │   │   ├── lib.rs          # Tauri命令实现
 │   │   ├── main.rs         # 程序入口
 │   │   ├── db.rs           # 数据库操作
-│   │   └── watcher.rs      # 文件监听
+│   │   ├── watcher.rs      # 文件监听 + 标签生成 + 关联分析
+│   │   ├── ast_parser.rs   # AST 导入关系解析
+│   │   ├── tfidf.rs        # TF-IDF 内容相似度
+│   │   ├── semantic_search.rs # 语义搜索 (同义词扩展)
+│   │   ├── semantic_embedding.rs # 语义嵌入 + 归档建议
+│   │   └── plugin_system.rs   # 插件系统
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
 │   └── capabilities/
@@ -206,12 +214,11 @@ xiaodangjia/
 
 ## 8. 后续完善建议
 
-- [ ] 向量数据库集成
-- [ ] AI Agent 智能分析
+- [x] 向量数据库集成 (轻量级嵌入已实现)
+- [x] AI Agent 智能分析 (规则引擎 + 语义搜索已实现)
 - [ ] 文件版本管理
-- [ ] 插件系统
+- [x] 插件系统 (基础框架已实现)
 - [ ] 云同步功能
 
 ---
-
-*最后更新: 2026-06-10*
+*最后更新: 2026-06-16*

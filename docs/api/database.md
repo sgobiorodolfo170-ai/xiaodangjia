@@ -76,6 +76,12 @@ CREATE TABLE file_nodes (
 | is_collapsed | INTEGER | 是否折叠 (0/1) |
 | is_directory | INTEGER | 是否目录 (0/1) |
 
+> **注意**: `children` 和 `relatedFiles` 字段不在数据库中存储。它们在查询时由 Rust 后端动态计算：
+> - `children`: 根据 `parent_id` 关系从 file_nodes 表聚合子节点 ID 列表
+> - `relatedFiles`: 从 `file_relations` 表查询关联文件的 ID 列表
+>
+> 这两个字段通过 Tauri 命令返回给前端，但不持久化到 SQLite。
+
 ### 2.3 文件关联表 (file_relations)
 
 存储文件之间的关联关系。
@@ -229,4 +235,4 @@ ALTER TABLE file_nodes ADD COLUMN description TEXT;
 
 ---
 
-*最后更新: 2026-06-10*
+*最后更新: 2026-06-16*

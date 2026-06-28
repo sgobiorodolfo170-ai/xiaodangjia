@@ -20,11 +20,8 @@ description: 小当家项目的 API 接口参考文档
 
 | 函数 | 说明 | 参数 |
 |------|------|------|
-| `scanDirectory(projectId, path)` | 扫描目录 | `projectId: string`, `path: string` |
-| `readFileContent(path)` | 读取文件内容 | `path: string` |
-| `writeFileContent(path, content)` | 写入文件 | `path: string`, `content: string` |
-| `deleteFile(path)` | 删除文件 | `path: string` |
-| `renameFile(oldPath, newPath)` | 重命名文件 | `oldPath: string`, `newPath: string` |
+| `deleteFile(projectId, path)` | 删除文件 | `projectId: string`, `path: string` |
+| `renameFile(projectId, oldPath, newPath)` | 重命名文件 | `projectId: string`, `oldPath: string`, `newPath: string` |
 
 ### 1.3 节点管理
 
@@ -41,6 +38,18 @@ description: 小当家项目的 API 接口参考文档
 | `generateTags(projectId, fileId)` | 生成文件标签 | `projectId: string`, `fileId: string` |
 | `searchFiles(projectId, query)` | 搜索文件 | `projectId: string`, `query: string` |
 | `findSimilarFiles(projectId, fileId)` | 查找相似文件 | `projectId: string`, `fileId: string` |
+
+### 1.6 AI 增强分析
+
+| 函数 | 说明 | 参数 |
+|------|------|------|
+| `semanticSearchFiles(projectId, query)` | 语义搜索 (同义词扩展) | `projectId: string`, `query: string` |
+| `findSimilarByContent(projectId, fileId, topK?)` | TF-IDF 内容相似度 | `projectId: string`, `fileId: string`, `topK?: number` |
+| `findSimilarByEmbedding(projectId, fileId, topK?)` | 嵌入向量相似度 | `projectId: string`, `fileId: string`, `topK?: number` |
+| `suggestArchiveLocation(projectId, fileId)` | 智能归档建议 | `projectId: string`, `fileId: string` |
+| `parseFileImports(path)` | 解析文件导入 | `path: string` |
+| `analyzeImportRelations(projectId)` | 分析导入关系 | `projectId: string` |
+| `listPlugins()` | 列出已注册插件 | - |
 
 ### 1.5 系统交互
 
@@ -89,11 +98,11 @@ fn write_file_content(path: String, content: String) -> Result<(), String>
 
 // 删除文件
 #[tauri::command]
-fn delete_file(path: String) -> Result<(), String>
+fn delete_file(project_id: String, path: String, state: State<AppState>) -> Result<(), String>
 
 // 重命名文件
 #[tauri::command]
-fn rename_file(old_path: String, new_path: String) -> Result<(), String>
+fn rename_file(project_id: String, old_path: String, new_path: String, state: State<AppState>) -> Result<(), String>
 ```
 
 ### 2.3 节点管理命令
@@ -122,6 +131,38 @@ fn search_files(project_id: String, query: String, state: State<AppState>) -> Re
 // 查找相似文件
 #[tauri::command]
 fn find_similar_files(project_id: String, file_id: String, state: State<AppState>) -> Result<Vec<FileNode>, String>
+```
+
+### 2.5 AI 增强分析命令
+
+```rust
+// 语义搜索
+#[tauri::command]
+fn semantic_search_files(project_id: String, query: String, state: State<AppState>) -> Result<Vec<FileNode>, String>
+
+// TF-IDF 内容相似度
+#[tauri::command]
+fn find_similar_by_content(project_id: String, file_id: String, top_k: Option<usize>, state: State<AppState>) -> Result<Vec<TfidfSimilarityResult>, String>
+
+// 嵌入向量相似度
+#[tauri::command]
+fn find_similar_by_embedding(project_id: String, file_id: String, top_k: Option<usize>, state: State<AppState>) -> Result<Vec<EmbeddingSimilarityResult>, String>
+
+// 智能归档建议
+#[tauri::command]
+fn suggest_archive_location(project_id: String, file_id: String, state: State<AppState>) -> Result<Vec<ArchiveSuggestion>, String>
+
+// 解析文件导入
+#[tauri::command]
+fn parse_file_imports(path: String) -> Result<Vec<String>, String>
+
+// 分析导入关系
+#[tauri::command]
+fn analyze_import_relations(project_id: String, state: State<AppState>) -> Result<Vec<ImportRelationResult>, String>
+
+// 列出插件
+#[tauri::command]
+fn list_plugins() -> Result<Vec<PluginMetadata>, String>
 ```
 
 ### 2.5 系统交互命令
@@ -183,6 +224,35 @@ interface FileRelation {
   relation_type: string;
   confidence: number;
 }
+
+interface SimilarityResult {
+  id: string;
+  name: string;
+  score: number;
+}
+
+interface ArchiveSuggestion {
+  directory: string;
+  confidence: number;
+  reason: string;
+}
+
+interface ImportRelationResult {
+  source_id: string;
+  source_name: string;
+  target_id: string;
+  target_name: string;
+  confidence: number;
+}
+
+interface PluginMetadata {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  enabled: boolean;
+}
 ```
 
 ### 3.2 Rust 类型 (src-tauri/src/lib.rs)
@@ -216,4 +286,4 @@ pub struct FileContent {
 
 ---
 
-*最后更新: 2026-06-10*
+*最后更新: 2026-06-16*
